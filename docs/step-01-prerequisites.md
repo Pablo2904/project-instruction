@@ -132,6 +132,32 @@ cdk --version   # e.g. 2.170.0
 
 ---
 
+## 1.7 – Repository structure
+
+This project follows an **enterprise-grade multi-repository layout**. Each service lives in its own GitHub repository, has its own CI pipeline, and is deployed independently. This mirrors how real teams work — frontend engineers, backend engineers, and platform engineers can move at their own pace without stepping on each other.
+
+You will create **six repositories** in total:
+
+```
+my-app-frontend          ← React + Vite application
+my-app-express-api       ← Express REST API (orders, PostgreSQL)
+my-app-nest-api          ← NestJS API (events, DynamoDB) – hexagonal architecture
+my-app-cdk-recipes       ← Shared CDK L3 Constructs (npm library)
+my-app-infra             ← AWS CDK infrastructure definitions
+my-app-lambda            ← Lambda function (order-processor)
+```
+
+> **Why separate repos?**
+> - Independent versioning and release cycles
+> - Each repo's CI only runs tests relevant to that service
+> - Teams have clear ownership boundaries
+> - Secrets and deploy permissions are scoped per repo
+> - `my-app-cdk-recipes` is a reusable library — any infra project can install it as an npm package
+
+Create all six repositories now on [GitHub](https://github.com/new) — set them all to **private**. You will push code to them as you progress through the steps.
+
+---
+
 ## Checklist
 
 Before moving on, make sure you have:
@@ -142,6 +168,7 @@ Before moving on, make sure you have:
 - [ ] Node.js 22 installed via nvm
 - [ ] Docker and Docker Compose installed and running
 - [ ] AWS CDK CLI installed
+- [ ] Five empty GitHub repositories created (`my-app-frontend`, `my-app-express-api`, `my-app-nest-api`, `my-app-infra`, `my-app-lambda`)
 
 ---
 

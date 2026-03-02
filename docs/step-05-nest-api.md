@@ -1,6 +1,11 @@
-# Step 5 – NestJS API
+# Step 5 – NestJS API (Hexagonal Architecture)
 
-Build a NestJS API that reads processed events from DynamoDB and serves them to the frontend.
+Build a NestJS API that reads processed events from DynamoDB. The API is structured using **Hexagonal Architecture** (Ports & Adapters) — a pattern that keeps business logic completely independent of frameworks and infrastructure.
+
+> **Repository:** work inside your `my-app-nest-api` repo for this step.
+
+> **📖 Why NestJS instead of plain Express?**
+> NestJS is a structured framework built on top of Express. It enforces a module system, uses TypeScript decorators to declare routes and services, and provides **Dependency Injection (DI)** out of the box. DI means you declare what dependencies a class needs in its constructor and the framework wires them together — you never call `new SomeService()` yourself. This makes code easy to test (swap real services for mocks) and easy to reason about (each class is responsible for one thing).
 
 ---
 
@@ -8,251 +13,202 @@ Build a NestJS API that reads processed events from DynamoDB and serves them to 
 
 ```bash
 npm install -g @nestjs/cli
-nest new nest-api
-cd nest-api
+nest new . --skip-git
 npm run start:dev
 ```
 
-Visit [http://localhost:3001](http://localhost:3001) — you should see `Hello World!` (change the port in `src/main.ts` to `3001`).
+Visit [http://localhost:3000](http://localhost:3000) — you should see `Hello World!`.
+
+Change the port to `3001`:
+
+> **🤖 Ask your AI assistant:**
+> ```
+> In src/main.ts, change the app to listen on port 3001.
+> Also enable CORS and add ValidationPipe with whitelist: true globally.
+> ```
 
 ---
 
-## 5.2 – Understand the project structure
+## 5.2 – Hexagonal Architecture concepts
+
+> **📖 Why hexagonal architecture?**
+> In a traditional layered app the database details leak into every layer — if you swap PostgreSQL for DynamoDB you touch a dozen files. Hexagonal architecture inverts this: the domain defines an **interface** (Port) describing what it needs (e.g. “fetch all events”), and the infrastructure provides a concrete **Adapter** that fulfils that interface. Swapping DynamoDB for an in-memory store means writing one new class, nothing else changes. It also makes unit testing trivial — inject a stub adapter instead of a real database.
+
+Hexagonal Architecture (also called Ports & Adapters) organises code into three layers:
 
 ```
-nest-api/
-├── src/
-│   ├── app.module.ts       # root module
-│   ├── app.controller.ts   # default controller
-│   ├── app.service.ts      # default service
-│   └── main.ts             # bootstrap entry point
-├── test/
-│   └── app.e2e-spec.ts
-└── nest-cli.json
+┌─────────────────────────────────────────────┐
+│              Infrastructure                 │
+│  (HTTP controllers, DynamoDB adapter, etc.) │
+│           │              ▲                  │
+│     calls │              │ implements       │
+│           ▼              │                  │
+│         ┌────────────────────────┐          │
+│         │      Application       │          │
+│         │  (use cases / services)│          │
+│         │  depends on → Ports    │          │
+│         └────────────────────────┘          │
+│                    │                        │
+│              depends on                     │
+│                    ▼                        │
+│         ┌────────────────────────┐          │
+│         │        Domain          │          │
+│         │ (entities, port defs)  │          │
+│         └────────────────────────┘          │
+└─────────────────────────────────────────────┘
 ```
 
-| Concept | Description |
-|---------|-------------|
-| **Module** | Groups related controllers and providers |
-| **Controller** | Handles incoming HTTP requests |
-| **Service** | Business logic; injected via constructor |
-| **Provider** | Any class registered in the DI container |
-| **Guard** | Runs before a route handler; used for auth |
-| **Pipe** | Transforms or validates request data |
+| Concept | Role | Example |
+|---------|------|---------|
+| **Domain** | Core business entities and port interfaces — zero framework dependencies | `ProcessedEvent` entity, `EventRepository` interface |
+| **Port** | An interface that the application layer depends on | `EventRepository` with `findAll()` method |
+| **Adapter** | A concrete implementation of a port | `DynamoDBEventRepository` implementing `EventRepository` |
+| **Use Case** | Application logic orchestrating domain objects through ports | `GetEventsUseCase` |
+| **Controller** | Infrastructure adapter that receives HTTP requests and calls use cases | `EventsController` |
+
+The key benefit: **swap DynamoDB for any other data store by writing a new adapter** — no changes to the domain or application layers.
 
 ---
 
-## 5.3 – Change the port to 3001
+## 5.3 – Folder structure
 
-Update `src/main.ts`:
-
-```ts
-import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.enableCors();
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-  await app.listen(3001);
-}
-bootstrap();
-```
-
----
-
-## 5.4 – Install DynamoDB dependencies
+Create the following directory layout:
 
 ```bash
-npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb class-validator class-transformer
+mkdir -p src/domain
+mkdir -p src/application
+mkdir -p src/infrastructure/adapters
+mkdir -p src/infrastructure/http
+```
+
+```
+src/
+├── domain/
+│   ├── processed-event.entity.ts    # pure TypeScript class, no imports
+│   └── event-repository.port.ts     # interface (port)
+├── application/
+│   └── get-events.use-case.ts       # orchestrates via the port
+├── infrastructure/
+│   ├── adapters/
+│   │   └── dynamodb-event.repository.ts  # DynamoDB adapter (implements port)
+│   └── http/
+│       └── events.controller.ts     # HTTP adapter
+├── events.module.ts
+└── main.ts
 ```
 
 ---
 
-## 5.5 – Create a DynamoDB service
+## 5.4 – Domain layer
 
-Create `src/dynamo/dynamo.module.ts`:
+The domain layer has **no NestJS imports** — pure TypeScript only.
 
-```ts
-import { Module, Global } from '@nestjs/common';
-import { DynamoService } from './dynamo.service';
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/domain/processed-event.entity.ts:
+> A plain TypeScript class ProcessedEvent with four public fields:
+> id (string), type (string), orderId (number), processedAt (string).
+> ```
 
-@Global()
-@Module({
-  providers: [DynamoService],
-  exports: [DynamoService],
-})
-export class DynamoModule {}
-```
-
-Create `src/dynamo/dynamo.service.ts`:
-
-```ts
-import { Injectable } from '@nestjs/common';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-
-@Injectable()
-export class DynamoService {
-  public readonly client: DynamoDBDocumentClient;
-
-  constructor() {
-    const baseClient = new DynamoDBClient({
-      region: process.env.AWS_REGION ?? 'us-east-1',
-      ...(process.env.DYNAMODB_ENDPOINT
-        ? { endpoint: process.env.DYNAMODB_ENDPOINT }
-        : {}),
-    });
-    this.client = DynamoDBDocumentClient.from(baseClient);
-  }
-}
-```
-
-Import `DynamoModule` in `app.module.ts`:
-
-```ts
-import { DynamoModule } from './dynamo/dynamo.module';
-
-@Module({
-  imports: [DynamoModule, EventsModule],
-})
-export class AppModule {}
-```
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/domain/event-repository.port.ts:
+> An exported TypeScript interface EventRepository with one method:
+> findAll(): Promise<ProcessedEvent[]>
+> Also export a Symbol injection token: EVENT_REPOSITORY = Symbol('EventRepository').
+> ```
 
 ---
 
-## 5.6 – Generate an Events resource
+## 5.5 – Application layer (Use Case)
+
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/application/get-events.use-case.ts:
+> A NestJS injectable class GetEventsUseCase.
+> Constructor injects EventRepository using the EVENT_REPOSITORY token (@Inject).
+> It has one method: execute(): Promise<ProcessedEvent[]> that calls findAll() on the repository.
+> ```
+
+---
+
+## 5.6 – Infrastructure adapter (DynamoDB)
+
+```bash
+npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
+```
+
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/infrastructure/adapters/dynamodb-event.repository.ts:
+> A NestJS injectable class DynamoDBEventRepository that implements EventRepository.
+> In the constructor, create a DynamoDBDocumentClient using DynamoDBClient with region
+> from process.env.AWS_REGION and optional endpoint from process.env.DYNAMODB_ENDPOINT.
+>
+> Implement two methods:
+>   findByOrderId(orderId: number): Promise<OrderEvent[]>
+>     — sends a QueryCommand with KeyConditionExpression "PK = :pk"
+>       and ExpressionAttributeValues { ":pk": "ORDER#" + orderId }
+>       to the table process.env.EVENTS_TABLE.
+>   findByEventType(eventType: string): Promise<OrderEvent[]>
+>     — sends a QueryCommand against the GSI "eventType-processedAt-index"
+>       with KeyConditionExpression "eventType = :et".
+> Map each DynamoDB item to an OrderEvent instance.
+> ```
+
+---
+
+## 5.7 – HTTP Controller
 
 ```bash
 nest generate module events
-nest generate controller events
-nest generate service events
 ```
 
-Create `src/events/dto/processed-event.dto.ts`:
-
-```ts
-export class ProcessedEventDto {
-  id: string;
-  type: string;
-  orderId: number;
-  processedAt: string;
-}
-```
-
-Create `src/events/events.service.ts`:
-
-```ts
-import { Injectable } from '@nestjs/common';
-import { ScanCommand } from '@aws-sdk/lib-dynamodb';
-import { DynamoService } from '../dynamo/dynamo.service';
-
-const TABLE_NAME = process.env.EVENTS_TABLE ?? 'ProcessedEvents';
-
-@Injectable()
-export class EventsService {
-  constructor(private readonly dynamo: DynamoService) {}
-
-  async findAll() {
-    const result = await this.dynamo.client.send(
-      new ScanCommand({ TableName: TABLE_NAME }),
-    );
-    return result.Items ?? [];
-  }
-}
-```
-
-Create `src/events/events.controller.ts`:
-
-```ts
-import { Controller, Get } from '@nestjs/common';
-import { EventsService } from './events.service';
-
-@Controller('api/events')
-export class EventsController {
-  constructor(private readonly eventsService: EventsService) {}
-
-  @Get()
-  findAll() {
-    return this.eventsService.findAll();
-  }
-}
-```
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/infrastructure/http/events.controller.ts:
+> A NestJS controller with @Controller('api/events').
+> Inject GetEventsUseCase in the constructor.
+> Add a GET handler that calls useCase.execute() and returns the result.
+> ```
 
 ---
 
-## 5.7 – Add JWT authentication (optional)
+## 5.8 – Wire the module
 
-```bash
-npm install @nestjs/jwt @nestjs/passport passport passport-jwt
-npm install --save-dev @types/passport-jwt
-```
-
-Generate an Auth module:
-
-```bash
-nest generate module auth
-nest generate service auth
-nest generate guard auth/jwt
-```
-
-`src/auth/auth.service.ts` (abbreviated):
-
-```ts
-import { Injectable } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-
-@Injectable()
-export class AuthService {
-  constructor(private readonly jwtService: JwtService) {}
-
-  login(userId: number): { accessToken: string } {
-    return { accessToken: this.jwtService.sign({ sub: userId }) };
-  }
-}
-```
-
-Apply `JwtAuthGuard` to routes you want to protect:
-
-```ts
-import { UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt.guard';
-
-@UseGuards(JwtAuthGuard)
-@Get()
-findAll() { ... }
-```
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/events.module.ts:
+> A NestJS @Module that:
+> - imports nothing
+> - provides: GetEventsUseCase and { provide: EVENT_REPOSITORY, useClass: DynamoDBEventRepository }
+> - exports: GetEventsUseCase
+> - declares EventsController
+> Import EventsModule in AppModule.
+> ```
 
 ---
 
-## 5.8 – Add Swagger UI
+## 5.9 – Swagger (three lines vs. Step 3's boilerplate)
 
 ```bash
 npm install @nestjs/swagger
 ```
 
-Update `src/main.ts`:
+> **🤖 Ask your AI assistant:**
+> ```
+> In src/main.ts, after creating the app, set up SwaggerModule:
+> Use DocumentBuilder to set title "NestJS API" and version "1.0".
+> Mount the docs at /api/docs.
+> ```
 
-```ts
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+Visit [http://localhost:3001/api/docs](http://localhost:3001/api/docs).
 
-// inside bootstrap(), before app.listen():
-const config = new DocumentBuilder()
-  .setTitle('NestJS API')
-  .setVersion('1.0')
-  .addBearerAuth()
-  .build();
-
-const document = SwaggerModule.createDocument(app, config);
-SwaggerModule.setup('api/docs', app, document);
-```
-
-Visit [http://localhost:3001/api/docs](http://localhost:3001/api/docs) to see the interactive API docs.
+> **Compare with Step 3:** In Express you wrote JSDoc `@swagger` comments on every route by hand. In NestJS, `@nestjs/swagger` reads your TypeScript decorators automatically — the documentation is derived from source code with **zero extra annotations** for basic endpoints, and minimal ones for advanced cases.
 
 ---
 
-## 5.9 – Run tests
+## 5.10 – Run tests
 
 ```bash
 npm run test          # unit tests
@@ -260,32 +216,96 @@ npm run test:e2e      # end-to-end tests
 npm run test:cov      # coverage report
 ```
 
+> **🤖 Ask your AI assistant:**
+> ```
+> Write a unit test for GetEventsUseCase.
+> Mock EventRepository to return two ProcessedEvent instances.
+> Assert that execute() returns exactly those two items.
+> ```
+
 ---
 
-## 5.10 – Dockerise
+## 5.11 – Dockerise
 
-Create `nest-api/Dockerfile`:
+> **🤖 Ask your AI assistant:**
+> ```
+> Create a multi-stage Dockerfile for the NestJS app.
+> Stage 1 (build): node:22-alpine, npm ci, npm run build.
+> Stage 2 (run): node:22-alpine, npm ci --omit=dev, copy dist/, expose 3001,
+> CMD node dist/main.js.
+> ```
 
-```dockerfile
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+---
 
-FROM node:22-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev
-COPY --from=build /app/dist ./dist
-ENV NODE_ENV=production
-EXPOSE 3001
-CMD ["node", "dist/main.js"]
+## 5.12 – Lambda handler with `serverless-http`
+
+Same approach as in Step 3 (Express API) — `serverless-http` bridges API Gateway's JSON events to a Node.js HTTP interface. NestJS needs one extra step: the framework has a startup phase (DI container wiring, decorator scanning) that takes ~300ms and must be handled carefully.
+
+```bash
+npm install serverless-http
+npm install --save-dev @types/aws-lambda
 ```
+
+> **📖 Lambda container reuse**
+> AWS Lambda reuses the same Node.js process for multiple consecutive invocations (**warm start**). Code outside the `handler` function runs only once when the container starts, not on every request. This is exactly where we put the NestJS bootstrap.
+
+> **🤖 Ask your AI assistant:**
+> ```
+> Create src/lambda.ts in my-app-nest-api.
+> Import NestFactory from "@nestjs/core", serverlessHttp from "serverless-http",
+> and AppModule from "./app.module".
+>
+> Declare a module-level variable: let cachedApp: any;
+>
+> Define an async function bootstrap() that:
+>   1. Returns cachedApp immediately if it is already set (warm start — skips init).
+>   2. Creates a NestJS app: NestFactory.create(AppModule, { logger: false })
+>   3. Calls await nestApp.init()
+>   4. Assigns cachedApp = serverlessHttp(nestApp.getHttpAdapter().getInstance())
+>   5. Returns cachedApp.
+>
+> Export:
+>   export const handler = async (event: any, context: any) => {
+>     const app = await bootstrap();
+>     return app(event, context);
+>   };
+> ```
+
+> **📖 Why cache `cachedApp`?**
+> ```
+> Cold start (first request after idle):
+>   handler() → bootstrap() → NestFactory.create() [~300ms] → serverless-http()
+>                                                    ↓
+>                                              cachedApp = handler
+>
+> Warm start (subsequent requests):
+>   handler() → bootstrap() → cachedApp already set → return immediately [~0ms]
+> ```
+> Without caching, NestJS re-wires its entire DI container on every single Lambda invocation — that's 300ms added to every response. Caching makes warm invocations as fast as Express.
+
+---
+
+## 5.13 – Push to GitHub
+
+```bash
+git add .
+git commit -m "feat: nest api with hexagonal architecture, swagger, and lambda handler"
+git remote add origin https://github.com/<YOUR_ORG>/my-app-nest-api.git
+git push -u origin main
+```
+
+---
+
+## Checklist
+
+- [ ] `GET /api/events` returns a list (empty list is fine — DynamoDB will be populated in Step 10)
+- [ ] `GET /api/docs` shows the Swagger UI with `EventsController` listed
+- [ ] Domain layer (`src/domain/`) has zero NestJS imports
+- [ ] `src/lambda.ts` exports a `handler` with app caching
+- [ ] Swapping the DynamoDB adapter for an in-memory stub works without touching use case or domain code
 
 ---
 
 ## Next step
 
-➡️ [Step 6 – AWS CDK Infrastructure](step-06-aws-cdk-infra.md)
+➡️ [Step 6 – CloudWatch Observability](step-14-cloudwatch.md)
