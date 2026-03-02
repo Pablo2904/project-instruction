@@ -251,38 +251,61 @@ serverless remove --stage dev
 
 ---
 
-## Step 11 – Provision Lambda with Terraform
+## Step 11 – Provision Lambda with AWS CDK
 
-Alternatively, manage Lambda with Terraform for tighter IaC control.
+Alternatively, manage Lambda with AWS CDK for tighter IaC control alongside the rest of your infrastructure.
 
-`infra/lambda.tf`:
+```bash
+cd infra
+npm install aws-cdk-lib constructs
+```
 
-```hcl
-resource "aws_lambda_function" "hello" {
-  function_name    = "hello-${var.environment}"
-  runtime          = "nodejs18.x"
-  handler          = "dist/handler.hello"
-  filename         = "${path.module}/../my-lambda/my-lambda.zip"
-  source_code_hash = filebase64sha256("${path.module}/../my-lambda/my-lambda.zip")
-  role             = aws_iam_role.lambda_exec.arn
+Add to `lib/lambda-stack.ts`:
+
+```ts
+import * as cdk from 'aws-cdk-lib';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as apigateway from 'aws-cdk-lib/aws-apigatewayv2';
+import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { Construct } from 'constructs';
+
+export class LambdaStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const helloFn = new lambda.Function(this, 'HelloFunction', {
+      functionName: `hello-${this.stackName}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'dist/handler.hello',
+      code: lambda.Code.fromAsset('../my-lambda'),
+      environment: {
+        NODE_ENV: 'production',
+      },
+    });
+
+    const httpApi = new apigateway.HttpApi(this, 'HttpApi');
+
+    httpApi.addRoutes({
+      path: '/hello',
+      methods: [apigateway.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration('HelloIntegration', helloFn),
+    });
+
+    new cdk.CfnOutput(this, 'ApiUrl', { value: httpApi.apiEndpoint });
+  }
 }
+```
 
-resource "aws_iam_role" "lambda_exec" {
-  name = "lambda-exec-${var.environment}"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-    }]
-  })
-}
+Deploy:
 
-resource "aws_iam_role_policy_attachment" "basic" {
-  role       = aws_iam_role.lambda_exec.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+```bash
+cdk deploy
+```
+
+Destroy:
+
+```bash
+cdk destroy
 ```
 
 ---

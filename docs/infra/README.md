@@ -1,6 +1,6 @@
-# Infrastructure – Docker & Terraform
+# Infrastructure – Docker & AWS CDK
 
-Step-by-step instructions for containerising every service and provisioning cloud infrastructure with Terraform.
+Step-by-step instructions for containerising every service and provisioning cloud infrastructure with AWS CDK (TypeScript) and CloudFormation.
 
 ---
 
@@ -88,136 +88,146 @@ docker compose down
 
 ---
 
-## Step 3 – Install Terraform
-
-Follow the [official Terraform installation guide](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli).
-
-Verify:
+## Step 3 – Install the AWS CDK
 
 ```bash
-terraform version   # e.g. Terraform v1.6.0
+npm install -g aws-cdk
+cdk --version   # e.g. 2.100.0 (build xxxxxxx)
 ```
 
 ---
 
-## Step 4 – Understand Terraform concepts
+## Step 4 – Understand CDK concepts
 
 | Concept | Description |
 |---------|-------------|
-| **Provider** | Plugin that talks to a cloud API (e.g. `hashicorp/aws`) |
-| **Resource** | A single infrastructure object (e.g. `aws_sqs_queue`) |
-| **Variable** | Input value – keeps configs reusable |
-| **Output** | Exported value you can read after `apply` |
-| **State** | File (`terraform.tfstate`) tracking what Terraform has created |
+| **App** | Root of the CDK program; contains one or more stacks |
+| **Stack** | Unit of deployment – maps 1-to-1 to a CloudFormation stack |
+| **Construct** | Reusable building block representing one or more AWS resources |
+| **Synthesize** | `cdk synth` converts CDK code to a CloudFormation template |
+| **Bootstrap** | One-time setup that creates an S3 bucket and ECR repo CDK needs to deploy |
 
 ---
 
-## Step 5 – Create a Terraform project
+## Step 5 – Create a CDK app
 
-Create `infra/` at the repo root:
+```bash
+mkdir infra && cd infra
+cdk init app --language typescript
+npm install
+```
+
+Generated structure:
 
 ```
 infra/
-├── main.tf
-├── variables.tf
-├── outputs.tf
-└── terraform.tfvars
+├── bin/
+│   └── infra.ts        # App entry point – instantiates stacks
+├── lib/
+│   └── infra-stack.ts  # Your stack definition
+├── cdk.json            # CDK toolkit configuration
+└── tsconfig.json
 ```
 
-`infra/variables.tf`:
+`bin/infra.ts`:
 
-```hcl
-variable "aws_region" {
-  description = "AWS region to deploy to"
-  type        = string
-  default     = "us-east-1"
-}
+```ts
+import * as cdk from 'aws-cdk-lib';
+import { InfraStack } from '../lib/infra-stack';
 
-variable "environment" {
-  description = "Deployment environment (dev / staging / prod)"
-  type        = string
-  default     = "dev"
-}
+const app = new cdk.App();
+
+new InfraStack(app, 'InfraStack', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
+  },
+});
 ```
 
-`infra/main.tf`:
+`lib/infra-stack.ts`:
 
-```hcl
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
+```ts
+import * as cdk from 'aws-cdk-lib';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import { Construct } from 'constructs';
+
+export class InfraStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // S3 bucket for static frontend assets
+    const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
+      bucketName: `my-app-frontend-${this.stackName.toLowerCase()}`,
+      websiteIndexDocument: 'index.html',
+      websiteErrorDocument: 'index.html',
+      publicReadAccess: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ACLS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
+    new cdk.CfnOutput(this, 'FrontendBucketName', {
+      value: frontendBucket.bucketName,
+    });
+
+    new cdk.CfnOutput(this, 'FrontendWebsiteUrl', {
+      value: frontendBucket.bucketWebsiteUrl,
+    });
   }
-}
-
-provider "aws" {
-  region = var.aws_region
-}
-
-# S3 bucket for static frontend assets
-resource "aws_s3_bucket" "frontend" {
-  bucket = "my-app-frontend-${var.environment}"
-}
-
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  index_document { suffix = "index.html" }
-  error_document { key    = "index.html" }
-}
-```
-
-`infra/outputs.tf`:
-
-```hcl
-output "frontend_bucket_name" {
-  value = aws_s3_bucket.frontend.bucket
-}
-
-output "frontend_website_endpoint" {
-  value = aws_s3_bucket_website_configuration.frontend.website_endpoint
 }
 ```
 
 ---
 
-## Step 6 – Initialise and apply
+## Step 6 – Bootstrap, synthesize, and deploy
+
+Bootstrap your AWS account/region (one-time step per account+region):
 
 ```bash
-cd infra
-terraform init      # download providers
-terraform plan      # preview changes
-terraform apply     # create resources (type 'yes' when prompted)
+cdk bootstrap aws://<ACCOUNT_ID>/us-east-1
 ```
 
-Destroy when you no longer need the resources:
+Preview the CloudFormation template CDK will generate:
 
 ```bash
-terraform destroy
+cdk synth
+```
+
+Deploy:
+
+```bash
+cdk deploy
+```
+
+Destroy all resources when you no longer need them:
+
+```bash
+cdk destroy
 ```
 
 ---
 
-## Step 7 – Store Terraform state remotely (S3 backend)
+## Step 7 – Multiple environments
 
-Using a local `terraform.tfstate` file is fine for learning, but in a team environment you need a remote backend. Add to `main.tf`:
+Pass context values or use environment variables to differentiate stacks:
 
-```hcl
-terraform {
-  backend "s3" {
-    bucket         = "my-terraform-state-bucket"
-    key            = "project-instruction/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "terraform-state-lock"
-    encrypt        = true
-  }
-  # ... required_providers stays the same
-}
+```ts
+// bin/infra.ts
+const env = app.node.tryGetContext('env') ?? 'dev';
+
+new InfraStack(app, `InfraStack-${env}`, {
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+  stackName: `my-app-${env}`,
+});
 ```
 
-Create the S3 bucket and DynamoDB table once manually (or bootstrap them with a separate Terraform config).
+Deploy to a specific environment:
+
+```bash
+cdk deploy -c env=staging
+cdk deploy -c env=prod
+```
 
 ---
 

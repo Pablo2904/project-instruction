@@ -329,35 +329,70 @@ aws sqs set-queue-attributes \
 
 ---
 
-## Step 10 – Provision SQS with Terraform
+## Step 10 – Provision SQS with AWS CDK
 
-`infra/sqs.tf`:
+`lib/sqs-stack.ts`:
 
-```hcl
-resource "aws_sqs_queue" "orders_dlq" {
-  name                      = "orders-dlq-${var.environment}"
-  message_retention_seconds = 1209600 # 14 days
-}
+```ts
+import * as cdk from 'aws-cdk-lib';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { Construct } from 'constructs';
 
-resource "aws_sqs_queue" "orders" {
-  name                       = "orders-${var.environment}"
-  visibility_timeout_seconds = 60
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.orders_dlq.arn
-    maxReceiveCount     = 3
-  })
-}
+export class SqsStack extends cdk.Stack {
+  public readonly ordersQueue: sqs.Queue;
 
-output "orders_queue_url" {
-  value = aws_sqs_queue.orders.url
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const ordersDlq = new sqs.Queue(this, 'OrdersDLQ', {
+      queueName: `orders-dlq-${this.stackName}`,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+
+    this.ordersQueue = new sqs.Queue(this, 'OrdersQueue', {
+      queueName: `orders-${this.stackName}`,
+      visibilityTimeout: cdk.Duration.seconds(60),
+      deadLetterQueue: {
+        queue: ordersDlq,
+        maxReceiveCount: 3,
+      },
+    });
+
+    new cdk.CfnOutput(this, 'OrdersQueueUrl', {
+      value: this.ordersQueue.queueUrl,
+    });
+
+    new cdk.CfnOutput(this, 'OrdersDlqUrl', {
+      value: ordersDlq.queueUrl,
+    });
+  }
 }
 ```
 
-Apply:
+Register the stack in `bin/infra.ts`:
+
+```ts
+import { SqsStack } from '../lib/sqs-stack';
+
+const env = app.node.tryGetContext('env') ?? 'dev';
+
+new SqsStack(app, 'SqsStack', {
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+  stackName: `my-app-${env}`,
+});
+```
+
+Deploy:
 
 ```bash
 cd infra
-terraform apply
+cdk deploy SqsStack
+```
+
+Destroy:
+
+```bash
+cdk destroy SqsStack
 ```
 
 ---

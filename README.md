@@ -5,7 +5,7 @@ A step-by-step learning guide that walks you through building a full-stack syste
 ## Table of Contents
 
 1. [Frontend (React + Vite)](docs/frontend/README.md)
-2. [Infrastructure (Docker + Terraform)](docs/infra/README.md)
+2. [Infrastructure (Docker + AWS CDK)](docs/infra/README.md)
 3. Backend apps
    - [Express.js](docs/backend/express/README.md)
    - [NestJS](docs/backend/nest/README.md)
@@ -18,7 +18,7 @@ A step-by-step learning guide that walks you through building a full-stack syste
 1. docs/frontend    – build a React UI first so you have something to connect to
 2. docs/backend/express  – simplest Node.js server; understand HTTP fundamentals
 3. docs/backend/nest     – production-grade Node.js with DI, modules and decorators
-4. docs/infra            – containerise and deploy everything with Docker & Terraform
+4. docs/infra            – containerise and deploy everything with Docker & AWS CDK
 5. docs/backend/lambda   – go serverless; deploy functions to AWS
 6. docs/backend/sqs      – add async messaging between services with Amazon SQS
 ```
@@ -31,7 +31,7 @@ A step-by-step learning guide that walks you through building a full-stack syste
 | npm | 9 |
 | Docker | 24 |
 | AWS CLI | 2 |
-| Terraform | 1.6 |
+| AWS CDK | 2 |
 
 Install Node.js via [nvm](https://github.com/nvm-sh/nvm):
 
